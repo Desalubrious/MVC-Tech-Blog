@@ -1,88 +1,161 @@
 const router = require('express').Router();
 const { User, Post, Comment } = require('../../models');
-const sequelize = require('../../config/connection');
 const withAuth = require('../../utils/auth');
 
-router.get('/',(req,res)=>{
-    Post.findAll({
-        attributes: [ 'id','title','post_text','created_at',],
-        order: [[ 'created_at', 'DESC' ]],
-        include: [{
-            model: User,
-            attributes: ['username']
-        },
-        {
-            model: Comment,
-            attributes: ['id','comment_text','post_id','user_id','created_at'],
-            include: {
-                model: User,
-                attributes: ['username']
-            }
-        }]
-    }).then(dbPostData=> res.json(dbPostData))
-    .catch(error=>res.status(500).json(error));
-}
-);
-
-// Get a single post
-router.get('/:id',(req,res)=>{
-    Post.findOne({
-        where: {
-            id: req.params.id
-        },
-        attributes: [ 'id','title','post_text','created_at',],
-        include: [{
-            model: User,
-            attributes: ['username']
-        },
-        {
-            model: Comment,
-            attributes: ['id','comment_text','post_id','user_id','created_at'],
-            include: {
-                model: User,
-                attributes: ['username']
-            }
-        }]
-    }).then(dbPostData=> res.json(dbPostData))
-    .catch(error=>res.status(500).json(error));
-}
-);
-
-// Create a new post
-router.post('/', withAuth, (req,res)=>{
-    Post.create({
-        title: req.body.title,
-        post_text: req.body.post_text,
-        user_id: req.user.id
-    }).then(dbPostData=> res.json(dbPostData))
-    .catch(error=>res.status(500).json(error));
-}
-);
-
-// Update a post
-router.put('/:id', withAuth, (req,res)=>{
-    Post.update(req.body,
-        {
-            where: {
-                id: req.params.id
-            }
-        }
-    )
-    .then(dbPostData=> res.json(dbPostData))
-    .catch(error=>res.status(500).json(error));
-}
-);
-
-// Delete a post
-router.delete('/:id', withAuth, (req,res)=>{
-    Post.destroy({
-        where: {
-            id: req.params.id
-        }
+// GET /api/users
+router.get('/', (req, res) => {
+    // Access our User model and run .findAll() method
+    User.findAll({
+        attributes: { exclude: ['password'] }
     })
-    .then(dbPostData=> res.json(dbPostData))
-    .catch(error=>res.status(500).json(error));
-}
-);
+      .then(dbUserData => res.json(dbUserData))
+      .catch(err => {
+        console.log(err);
+        res.status(500).json(err);
+      });
+  });
+
+// GET /api/users/1
+router.get('/:id', (req, res) => {
+    User.findOne({
+        attributes: { exclude: ['password']},
+        where: {
+          id: req.params.id
+        },
+        include: [
+            {
+              model: Post,
+              attributes: ['id', 'title', 'post_content', 'created_at']
+            },
+            {
+                model: Comment,
+                attributes: ['id', 'comment_text', 'created_at'],
+                include: {
+                  model: Post,
+                  attributes: ['title']
+                }
+            }
+          ]
+
+    })
+      .then(dbUserData => {
+        if (!dbUserData) {
+          res.status(404).json({ message: 'No user found with this id' });
+          return;
+        }
+        res.json(dbUserData);
+      })
+      .catch(err => {
+        console.log(err);
+        res.status(500).json(err);
+      });
+  });
+
+// POST /api/users
+router.post('/', (req, res) => {
+    User.create({
+      username: req.body.username,
+      email: req.body.email,
+      password: req.body.password,
+      twitter: req.body.twitter,
+      github: req.body.github
+    })
+    .then(dbUserData => {
+      req.session.save(() => {
+        req.session.user_id = dbUserData.id;
+        req.session.username = dbUserData.username;
+        req.session.twitter = dbUserData.twitter;
+        req.session.github = dbUserData.github;
+        req.session.loggedIn = true;
+    
+        res.json(dbUserData);
+      });
+    });
+  });
+
+  // LOGIN
+  router.post('/login', (req, res) => {
+    User.findOne({
+      where: {
+        email: req.body.email
+      }
+    }).then(dbUserData => {
+      if (!dbUserData) {
+        res.status(400).json({ message: 'No user with that email address!' });
+        return;
+      }
+  
+      const validPassword = dbUserData.checkPassword(req.body.password);
+  
+      if (!validPassword) {
+        res.status(400).json({ message: 'Incorrect password!' });
+        return;
+      }
+  
+      req.session.save(() => {
+        // declare session variables
+        req.session.user_id = dbUserData.id;
+        req.session.username = dbUserData.username;
+        req.session.twitter = dbUserData.twitter;
+        req.session.github = dbUserData.github;
+        req.session.loggedIn = true;
+  
+        res.json({ user: dbUserData, message: 'You are now logged in!' });
+      });
+    });
+  });
+
+
+  router.post('/logout', (req, res) => {
+    if (req.session.loggedIn) {
+      req.session.destroy(() => {
+        res.status(204).end();
+      });
+    }
+    else {
+      res.status(404).end();
+    }
+  });
+
+// PUT /api/users/1
+router.put('/:id', withAuth, (req, res) => {
+    User.update(req.body, {
+        individualHooks: true,
+        where: {
+            id: req.params.id
+      }
+    })
+      .then(dbUserData => {
+        if (!dbUserData[0]) {
+          res.status(404).json({ message: 'No user found with this id' });
+          return;
+        }
+        res.json(dbUserData);
+      })
+      .catch(err => {
+        console.log(err);
+        res.status(500).json(err);
+      });
+  });
+
+// DELETE /api/users/1
+router.delete('/:id', withAuth, (req, res) => {
+    User.destroy({
+      where: {
+        id: req.params.id
+      }
+    })
+      .then(dbUserData => {
+        if (!dbUserData) {
+          res.status(404).json({ message: 'No user found with this id' });
+          return;
+        }
+        res.json(dbUserData);
+      })
+      .catch(err => {
+        console.log(err);
+        res.status(500).json(err);
+      });
+  });
 
 module.exports = router;
